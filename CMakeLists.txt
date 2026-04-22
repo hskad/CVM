@@ -16,17 +16,29 @@ endif()
 add_executable(cvm
     src/main.cpp
     src/Lexer.cpp
+    src/Parser.cpp
+    src/ASTPrinter.cpp
 )
 
 target_include_directories(cvm PRIVATE include)
 
-# ── Test executable ──────────────────────────────────────────────────────────
+# ── Lexer test executable ─────────────────────────────────────────────────────
 add_executable(test_lexer
     tests/test_lexer.cpp
     src/Lexer.cpp
 )
 
 target_include_directories(test_lexer PRIVATE include)
+
+# ── Parser test executable ────────────────────────────────────────────────────
+add_executable(test_parser
+    tests/test_parser.cpp
+    src/Lexer.cpp
+    src/Parser.cpp
+    src/ASTPrinter.cpp
+)
+
+target_include_directories(test_parser PRIVATE include)
 
 # ── Install ──────────────────────────────────────────────────────────────────
 install(TARGETS cvm DESTINATION bin)

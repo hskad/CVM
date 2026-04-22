@@ -67,8 +67,8 @@ CVM++/
 | Phase | Status | Description |
 |---|---|---|
 | 1 — Lexer | ✅ Complete | Tokenisation of all language constructs |
-| 2 — Parser | 🔜 Next | Recursive descent parser → AST |
-| 3 — Compiler | 🔜 | AST → bytecode with backpatching |
+| 2 — Parser | ✅ Complete | Recursive descent parser → AST |
+| 3 — Compiler | 🔜 Next | AST → bytecode with backpatching |
 | 4 — VM | 🔜 | Stack-based execution engine |
 | 5 — Control flow & REPL | 🔜 | `if`, `while`, interactive shell |
 | 6 — Polish | 🔜 | Error recovery, debug flags, example scripts |

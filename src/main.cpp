@@ -1,4 +1,6 @@
 #include "Lexer.h"
+#include "Parser.h"
+#include "AST.h"
 #include "Token.h"
 
 #include <fstream>
@@ -13,7 +15,8 @@
 // Runs the lexer on a source string, prints the token list, and reports
 // any errors.  Later phases (parser, compiler, VM) will be plugged in here.
 // ─────────────────────────────────────────────────────────────────────────────
-static void runSource(const std::string& source, bool debugTokens) {
+static void runSource(const std::string& source, bool debugTokens, bool debugAst) {
+    // ── Phase 1: Lex ─────────────────────────────────────────────────────
     Lexer lexer(source);
     std::vector<Token> tokens = lexer.tokenize();
 
@@ -27,8 +30,26 @@ static void runSource(const std::string& source, bool debugTokens) {
 
     if (lexer.hadError()) {
         std::cerr << "[cvm] Lexer reported errors. Aborting.\n";
+        return;
     }
-    // TODO Phase 2: pass tokens to Parser
+
+    // ── Phase 2: Parse ───────────────────────────────────────────────────
+    Parser parser(std::move(tokens));
+    std::vector<StmtPtr> program = parser.parse();
+
+    if (debugAst) {
+        std::cout << "\n── AST ────────────────────────────────────────\n";
+        for (const auto& stmt : program) {
+            printStmt(std::cout, *stmt);
+        }
+        std::cout << "───────────────────────────────────────────────\n\n";
+    }
+
+    if (parser.hadError()) {
+        std::cerr << "[cvm] Parser reported errors. Aborting.\n";
+        return;
+    }
+
     // TODO Phase 3: pass AST to Compiler
     // TODO Phase 4: pass Chunk to VM
 }
@@ -38,7 +59,7 @@ static void runSource(const std::string& source, bool debugTokens) {
 //
 // Reads an entire .cvm file into a string and passes it to runSource.
 // ─────────────────────────────────────────────────────────────────────────────
-static int runFile(const std::string& path, bool debugTokens) {
+static int runFile(const std::string& path, bool debugTokens, bool debugAst) {
     std::ifstream file(path);
     if (!file.is_open()) {
         std::cerr << "[cvm] Could not open file: " << path << "\n";
@@ -47,7 +68,7 @@ static int runFile(const std::string& path, bool debugTokens) {
 
     std::ostringstream buf;
     buf << file.rdbuf();
-    runSource(buf.str(), debugTokens);
+    runSource(buf.str(), debugTokens, debugAst);
     return 0;
 }
 
@@ -56,7 +77,7 @@ static int runFile(const std::string& path, bool debugTokens) {
 //
 // Interactive Read-Eval-Print Loop.  Each line is lexed independently.
 // ─────────────────────────────────────────────────────────────────────────────
-static void runREPL(bool debugTokens) {
+static void runREPL(bool debugTokens, bool debugAst) {
     std::string line;
     std::cout << "CVM++ 0.1.0  (type 'exit' or 'quit' to leave)\n";
 
@@ -69,7 +90,7 @@ static void runREPL(bool debugTokens) {
         if (line == "exit" || line == "quit") break;
         if (line.empty()) continue;
 
-        runSource(line, debugTokens);
+        runSource(line, debugTokens, debugAst);
     }
 }
 
@@ -78,9 +99,10 @@ static void runREPL(bool debugTokens) {
 // ─────────────────────────────────────────────────────────────────────────────
 static void printUsage(const char* prog) {
     std::cerr << "Usage:\n"
-              << "  " << prog << "                     — start interactive REPL\n"
-              << "  " << prog << " <script.cvm>        — run a script file\n"
-              << "  " << prog << " --debug-tokens [file] — show token stream\n";
+              << "  " << prog << "                      — start interactive REPL\n"
+              << "  " << prog << " <script.cvm>         — run a script file\n"
+              << "  " << prog << " --debug-tokens [file] — show token stream\n"
+              << "  " << prog << " --debug-ast    [file] — show parsed AST\n";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -88,12 +110,15 @@ static void printUsage(const char* prog) {
 // ─────────────────────────────────────────────────────────────────────────────
 int main(int argc, char* argv[]) {
     bool        debugTokens = false;
+    bool        debugAst    = false;
     std::string scriptPath;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--debug-tokens") {
             debugTokens = true;
+        } else if (arg == "--debug-ast") {
+            debugAst = true;
         } else if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
             return 0;
@@ -107,11 +132,9 @@ int main(int argc, char* argv[]) {
     }
 
     if (!scriptPath.empty()) {
-        return runFile(scriptPath, debugTokens);
+        return runFile(scriptPath, debugTokens, debugAst);
     }
 
-    // No file supplied → REPL
-    // In REPL mode, always show tokens while we are still in Phase 1.
-    runREPL(true);
+    runREPL(debugTokens, debugAst);
     return 0;
 }
