@@ -12,22 +12,22 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# ── Main executable ──────────────────────────────────────────────────────────
-add_executable(cvm
-    src/main.cpp
+# ── Shared sources ────────────────────────────────────────────────────────────
+set(CVM_SOURCES
     src/Lexer.cpp
     src/Parser.cpp
     src/ASTPrinter.cpp
+    src/Chunk.cpp
+    src/Compiler.cpp
+    src/VM.cpp
 )
 
+# ── Main executable ──────────────────────────────────────────────────────────
+add_executable(cvm src/main.cpp ${CVM_SOURCES})
 target_include_directories(cvm PRIVATE include)
 
 # ── Lexer test executable ─────────────────────────────────────────────────────
-add_executable(test_lexer
-    tests/test_lexer.cpp
-    src/Lexer.cpp
-)
-
+add_executable(test_lexer tests/test_lexer.cpp src/Lexer.cpp)
 target_include_directories(test_lexer PRIVATE include)
 
 # ── Parser test executable ────────────────────────────────────────────────────
@@ -37,8 +37,15 @@ add_executable(test_parser
     src/Parser.cpp
     src/ASTPrinter.cpp
 )
-
 target_include_directories(test_parser PRIVATE include)
+
+# ── Compiler test executable ──────────────────────────────────────────────────
+add_executable(test_compiler tests/test_compiler.cpp ${CVM_SOURCES})
+target_include_directories(test_compiler PRIVATE include)
+
+# ── VM test executable ────────────────────────────────────────────────────────
+add_executable(test_vm tests/test_vm.cpp ${CVM_SOURCES})
+target_include_directories(test_vm PRIVATE include)
 
 # ── Install ──────────────────────────────────────────────────────────────────
 install(TARGETS cvm DESTINATION bin)
