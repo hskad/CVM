@@ -50,10 +50,13 @@ enum class OpCode : uint8_t {
     SUB,
     MUL,
     DIV,
+    MOD,            // a % b  (integer remainder)
     NEG,            // unary negate
 
     // ── Logic ─────────────────────────────────────────────────────────────
     NOT,            // boolean not
+    AND,            // a && b  (short-circuit — implemented via jumps in compiler)
+    OR,             // a || b  (short-circuit)
 
     // ── Comparisons ───────────────────────────────────────────────────────
     EQ,
@@ -90,8 +93,11 @@ inline const char* opName(OpCode op) {
         case OpCode::SUB:            return "SUB";
         case OpCode::MUL:            return "MUL";
         case OpCode::DIV:            return "DIV";
+        case OpCode::MOD:            return "MOD";
         case OpCode::NEG:            return "NEG";
         case OpCode::NOT:            return "NOT";
+        case OpCode::AND:            return "AND";
+        case OpCode::OR:             return "OR";
         case OpCode::EQ:             return "EQ";
         case OpCode::NEQ:            return "NEQ";
         case OpCode::LT:             return "LT";
@@ -124,43 +130,43 @@ inline const char* opName(OpCode op) {
 struct Chunk {
     std::vector<uint8_t>     code;     // raw bytecode
     std::vector<std::string> names;    // variable name table
+    std::vector<int>         lines;    // parallel to code: source line per byte
 
     // ── Emit helpers ─────────────────────────────────────────────────────
-    void emit(OpCode op)  { code.push_back(static_cast<uint8_t>(op)); }
+    void emit(OpCode op, int line) {
+        code.push_back(static_cast<uint8_t>(op));
+        lines.push_back(line);
+    }
 
     // Emit a 4-byte signed integer (little-endian).
-    void emitInt32(int32_t v) {
-        code.push_back(static_cast<uint8_t>( v        & 0xFF));
-        code.push_back(static_cast<uint8_t>((v >>  8) & 0xFF));
-        code.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
-        code.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+    void emitInt32(int32_t v, int line) {
+        for (int i = 0; i < 4; ++i) {
+            code.push_back(static_cast<uint8_t>((v >> (8*i)) & 0xFF));
+            lines.push_back(line);
+        }
     }
 
     // Emit a 2-byte unsigned integer (little-endian).
-    void emitUint16(uint16_t v) {
-        code.push_back(static_cast<uint8_t>( v       & 0xFF));
-        code.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+    void emitUint16(uint16_t v, int line) {
+        code.push_back(static_cast<uint8_t>( v       & 0xFF)); lines.push_back(line);
+        code.push_back(static_cast<uint8_t>((v >> 8) & 0xFF)); lines.push_back(line);
     }
 
     // Emit a 2-byte signed integer (little-endian) — used for jump offsets.
-    void emitInt16(int16_t v) {
-        emitUint16(static_cast<uint16_t>(v));
+    void emitInt16(int16_t v, int line) {
+        emitUint16(static_cast<uint16_t>(v), line);
     }
 
     // Emit a placeholder int16 and return its address for later patching.
-    std::size_t emitJumpPlaceholder() {
+    std::size_t emitJumpPlaceholder(int line) {
         std::size_t addr = code.size();
-        emitInt16(0);   // placeholder
+        emitInt16(0, line);   // placeholder
         return addr;
     }
 
     // Patch a previously-emitted int16 at addr with the correct offset.
-    // The offset is relative to the instruction *after* the placeholder.
     void patchJump(std::size_t placeholderAddr) {
-        // current position = first byte after the placeholder's parent opcode
-        // and the 2-byte operand.  The placeholder itself is at placeholderAddr.
         std::size_t target = code.size();
-        // offset = target - (placeholderAddr + 2)   (past the operand bytes)
         int16_t offset = static_cast<int16_t>(
             static_cast<std::ptrdiff_t>(target) -
             static_cast<std::ptrdiff_t>(placeholderAddr + 2));
@@ -179,6 +185,12 @@ struct Chunk {
 
     // Current write position (= next instruction offset).
     std::size_t here() const { return code.size(); }
+
+    // Source line for the byte at offset ip (or -1 if unknown).
+    int lineAt(std::size_t ip) const {
+        if (ip < lines.size()) return lines[ip];
+        return -1;
+    }
 
     // ── Disassembler ─────────────────────────────────────────────────────
     void disassemble(std::ostream& os, const std::string& title = "") const;

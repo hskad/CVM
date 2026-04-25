@@ -4,7 +4,6 @@
 #include "Token.h"
 
 #include <iostream>
-#include <stdexcept>
 #include <string>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20,7 +19,7 @@ Chunk Compiler::compile(const std::vector<StmtPtr>& program) {
         if (m_hadError) break;
     }
 
-    chunk.emit(OpCode::HALT);
+    chunk.emit(OpCode::HALT, 0);
     m_chunk = nullptr;
     return chunk;
 }
@@ -39,7 +38,7 @@ void Compiler::compileStmt(const Stmt& s) {
         case StmtKind::Block:    compileBlock(s);  break;
         case StmtKind::ExprStmt:
             compileExpr(*s.expr);
-            m_chunk->emit(OpCode::POP);  // discard result
+            m_chunk->emit(OpCode::POP, s.line);
             break;
     }
 }
@@ -48,96 +47,62 @@ void Compiler::compileStmt(const Stmt& s) {
 void Compiler::compileLet(const Stmt& s) {
     compileExpr(*s.expr);
     uint16_t idx = m_chunk->internName(s.name);
-    m_chunk->emit(OpCode::DEFINE);
-    m_chunk->emitUint16(idx);
+    m_chunk->emit(OpCode::DEFINE, s.line);
+    m_chunk->emitUint16(idx, s.line);
 }
 
 // name = expr ;
 void Compiler::compileAssign(const Stmt& s) {
     compileExpr(*s.expr);
     uint16_t idx = m_chunk->internName(s.name);
-    m_chunk->emit(OpCode::STORE);
-    m_chunk->emitUint16(idx);
+    m_chunk->emit(OpCode::STORE, s.line);
+    m_chunk->emitUint16(idx, s.line);
 }
 
 // if ( cond ) thenBlock [ else elseBlock ]
-//
-// Bytecode layout:
-//   <cond>
-//   JUMP_IF_FALSE  -> [after_then | before_else_block]
-//   <then_body>
-//   [JUMP -> after_else]        (only when else branch exists)
-//   <else_body>                 (optional)
-//
 void Compiler::compileIf(const Stmt& s) {
-    // Compile condition
     compileExpr(*s.expr);
 
-    // Emit conditional jump; save placeholder address for patching
-    m_chunk->emit(OpCode::JUMP_IF_FALSE);
-    std::size_t jumpIfFalseAddr = m_chunk->emitJumpPlaceholder();
+    m_chunk->emit(OpCode::JUMP_IF_FALSE, s.line);
+    std::size_t jumpIfFalseAddr = m_chunk->emitJumpPlaceholder(s.line);
 
-    // Compile then-branch
     compileStmt(*s.thenBranch);
 
     if (s.elseBranch) {
-        // Need an unconditional jump to skip the else block
-        m_chunk->emit(OpCode::JUMP);
-        std::size_t jumpOverElseAddr = m_chunk->emitJumpPlaceholder();
-
-        // Patch the JUMP_IF_FALSE to land here (start of else)
+        m_chunk->emit(OpCode::JUMP, s.line);
+        std::size_t jumpOverElseAddr = m_chunk->emitJumpPlaceholder(s.line);
         m_chunk->patchJump(jumpIfFalseAddr);
-
-        // Compile else-branch
         compileStmt(*s.elseBranch);
-
-        // Patch the unconditional jump to land here (after else)
         m_chunk->patchJump(jumpOverElseAddr);
     } else {
-        // No else: patch JUMP_IF_FALSE to land here (after then)
         m_chunk->patchJump(jumpIfFalseAddr);
     }
 }
 
 // while ( cond ) body
-//
-// Bytecode layout:
-//   [loop_start]:
-//   <cond>
-//   JUMP_IF_FALSE  -> after_body
-//   <body>
-//   JUMP           -> loop_start
-//   [after_body]:
-//
 void Compiler::compileWhile(const Stmt& s) {
     std::size_t loopStart = m_chunk->here();
 
-    // Compile condition
     compileExpr(*s.expr);
 
-    // Conditional exit jump
-    m_chunk->emit(OpCode::JUMP_IF_FALSE);
-    std::size_t exitJumpAddr = m_chunk->emitJumpPlaceholder();
+    m_chunk->emit(OpCode::JUMP_IF_FALSE, s.line);
+    std::size_t exitJumpAddr = m_chunk->emitJumpPlaceholder(s.line);
 
-    // Compile body
     compileStmt(*s.body);
 
-    // Unconditional back-jump to loop start
-    m_chunk->emit(OpCode::JUMP);
-    // offset = loopStart - (here + 2)   [the +2 is past the operand bytes]
+    m_chunk->emit(OpCode::JUMP, s.line);
     int16_t backOffset = static_cast<int16_t>(
         static_cast<std::ptrdiff_t>(loopStart) -
         static_cast<std::ptrdiff_t>(m_chunk->here() + 2));
-    m_chunk->emitInt16(backOffset);
+    m_chunk->emitInt16(backOffset, s.line);
 
-    // Patch exit jump to land here (after loop body)
     m_chunk->patchJump(exitJumpAddr);
 }
 
 // print expr ;
 void Compiler::compilePrint(const Stmt& s) {
     compileExpr(*s.expr);
-    m_chunk->emit(OpCode::PRINT);
+    m_chunk->emit(OpCode::PRINT, s.line);
 }
 
 // { stmt* }
@@ -156,24 +121,25 @@ void Compiler::compileExpr(const Expr& e) {
     switch (e.kind) {
 
         case ExprKind::NumberLit:
-            m_chunk->emit(OpCode::PUSH_INT);
-            m_chunk->emitInt32(static_cast<int32_t>(e.intValue));
+            m_chunk->emit(OpCode::PUSH_INT, e.line);
+            m_chunk->emitInt32(static_cast<int32_t>(e.intValue), e.line);
             break;
 
         case ExprKind::BoolLit:
-            m_chunk->emit(OpCode::PUSH_BOOL);
+            m_chunk->emit(OpCode::PUSH_BOOL, e.line);
             m_chunk->code.push_back(e.boolValue ? 1u : 0u);
+            m_chunk->lines.push_back(e.line);
             break;
 
         case ExprKind::Variable: {
             uint16_t idx = m_chunk->internName(e.name);
-            m_chunk->emit(OpCode::LOAD);
-            m_chunk->emitUint16(idx);
+            m_chunk->emit(OpCode::LOAD, e.line);
+            m_chunk->emitUint16(idx, e.line);
             break;
         }
 
         case ExprKind::Input:
-            m_chunk->emit(OpCode::INPUT);
+            m_chunk->emit(OpCode::INPUT, e.line);
             break;
 
         case ExprKind::Grouping:
@@ -183,30 +149,74 @@ void Compiler::compileExpr(const Expr& e) {
         case ExprKind::Unary:
             compileExpr(*e.lhs);
             switch (e.op) {
-                case TokenType::MINUS: m_chunk->emit(OpCode::NEG); break;
-                case TokenType::BANG:  m_chunk->emit(OpCode::NOT); break;
-                default:
-                    error(e.line, "Unknown unary operator");
+                case TokenType::MINUS: m_chunk->emit(OpCode::NEG, e.line); break;
+                case TokenType::BANG:  m_chunk->emit(OpCode::NOT, e.line); break;
+                default: error(e.line, "Unknown unary operator");
             }
             break;
 
         case ExprKind::Binary:
-            // Push left operand, then right, then operation
+            // Short-circuit operators are handled via jumps, not as binary ops
+            if (e.op == TokenType::AND) {
+                // a && b:
+                //   eval a
+                //   if false → jump to push_false (skip b)
+                //   eval b
+                //   jump over push_false
+                //   push false
+                compileExpr(*e.lhs);
+                m_chunk->emit(OpCode::JUMP_IF_FALSE, e.line);
+                std::size_t skipRight = m_chunk->emitJumpPlaceholder(e.line);
+                compileExpr(*e.rhs);
+                m_chunk->emit(OpCode::JUMP, e.line);
+                std::size_t skipFalse = m_chunk->emitJumpPlaceholder(e.line);
+                m_chunk->patchJump(skipRight);
+                m_chunk->emit(OpCode::PUSH_BOOL, e.line);
+                m_chunk->code.push_back(0u); m_chunk->lines.push_back(e.line);
+                m_chunk->patchJump(skipFalse);
+                break;
+            }
+            if (e.op == TokenType::OR) {
+                // a || b:
+                //   eval a
+                //   if true  → jump to push_true (skip b)
+                //   eval b
+                //   jump over push_true
+                //   push true
+                compileExpr(*e.lhs);
+                // Invert: JUMP_IF_FALSE means "if NOT true, keep going"
+                m_chunk->emit(OpCode::JUMP_IF_FALSE, e.line);
+                std::size_t evalRight = m_chunk->emitJumpPlaceholder(e.line);
+                // lhs was true — push true and skip rhs
+                m_chunk->emit(OpCode::JUMP, e.line);
+                std::size_t skipTrue = m_chunk->emitJumpPlaceholder(e.line);
+                m_chunk->patchJump(evalRight);
+                compileExpr(*e.rhs);
+                m_chunk->emit(OpCode::JUMP, e.line);
+                std::size_t skipFalse = m_chunk->emitJumpPlaceholder(e.line);
+                m_chunk->patchJump(skipTrue);
+                m_chunk->emit(OpCode::PUSH_BOOL, e.line);
+                m_chunk->code.push_back(1u); m_chunk->lines.push_back(e.line);
+                m_chunk->patchJump(skipFalse);
+                break;
+            }
+
+            // Standard binary: push both operands then the op
             compileExpr(*e.lhs);
             compileExpr(*e.rhs);
             switch (e.op) {
-                case TokenType::PLUS:    m_chunk->emit(OpCode::ADD);   break;
-                case TokenType::MINUS:   m_chunk->emit(OpCode::SUB);   break;
-                case TokenType::STAR:    m_chunk->emit(OpCode::MUL);   break;
-                case TokenType::SLASH:   m_chunk->emit(OpCode::DIV);   break;
-                case TokenType::EQEQ:    m_chunk->emit(OpCode::EQ);    break;
-                case TokenType::BANG_EQ: m_chunk->emit(OpCode::NEQ);   break;
-                case TokenType::LT:      m_chunk->emit(OpCode::LT);    break;
-                case TokenType::LT_EQ:   m_chunk->emit(OpCode::LT_EQ); break;
-                case TokenType::GT:      m_chunk->emit(OpCode::GT);    break;
-                case TokenType::GT_EQ:   m_chunk->emit(OpCode::GT_EQ); break;
-                default:
-                    error(e.line, "Unknown binary operator");
+                case TokenType::PLUS:    m_chunk->emit(OpCode::ADD,   e.line); break;
+                case TokenType::MINUS:   m_chunk->emit(OpCode::SUB,   e.line); break;
+                case TokenType::STAR:    m_chunk->emit(OpCode::MUL,   e.line); break;
+                case TokenType::SLASH:   m_chunk->emit(OpCode::DIV,   e.line); break;
+                case TokenType::PERCENT: m_chunk->emit(OpCode::MOD,   e.line); break;
+                case TokenType::EQEQ:    m_chunk->emit(OpCode::EQ,    e.line); break;
+                case TokenType::BANG_EQ: m_chunk->emit(OpCode::NEQ,   e.line); break;
+                case TokenType::LT:      m_chunk->emit(OpCode::LT,    e.line); break;
+                case TokenType::LT_EQ:   m_chunk->emit(OpCode::LT_EQ, e.line); break;
+                case TokenType::GT:      m_chunk->emit(OpCode::GT,    e.line); break;
+                case TokenType::GT_EQ:   m_chunk->emit(OpCode::GT_EQ, e.line); break;
+                default: error(e.line, "Unknown binary operator");
             }
             break;
     }

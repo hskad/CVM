@@ -1,0 +1,28 @@
+// primes.cvm
+// Prints all prime numbers up to 50 using trial division.
+// CVM++ has no modulo operator, so divisibility is tested by
+// checking whether n - d*(n/d) == 0.
+
+let n = 2;
+
+while (n <= 50) {
+    // Test if n is prime: try all divisors d from 2 to n-1
+    let isPrime = true;
+    let d = 2;
+
+    while (d <= n - 1) {
+        // Check if d divides n evenly (n mod d == 0)
+        let q      = n / d;
+        let remain = n - q * d;
+        if (remain == 0) {
+            isPrime = false;
+        }
+        d = d + 1;
+    }
+
+    if (isPrime == true) {
+        print n;
+    }
+
+    n = n + 1;
+}

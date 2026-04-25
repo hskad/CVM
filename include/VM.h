@@ -38,15 +38,34 @@ enum class VMResult { OK, RUNTIME_ERROR };
 //
 // A simple stack-based interpreter for the bytecode emitted by the Compiler.
 //
-// Usage:
-//     VM vm;
-//     VMResult result = vm.execute(chunk);
+// Two usage modes:
+//
+//   Stateless (file runner / one-shot):
+//       VM vm;
+//       VMResult result = vm.execute(chunk);
+//
+//   Stateful (REPL — variables persist across calls):
+//       VM vm;
+//       vm.execute(chunk1);   // defines 'x'
+//       vm.execute(chunk2);   // can still read 'x'
+//
+// Variables are stored by name (string key) rather than by chunk-local index
+// so that they survive across independently compiled chunks.  Each execute()
+// call builds a local index→name map from the incoming chunk's name table and
+// uses it to look up/store values in the persistent m_globals store.
 // ─────────────────────────────────────────────────────────────────────────────
 class VM {
 public:
     VM() = default;
 
+    // Execute a compiled chunk.  Returns OK or RUNTIME_ERROR.
     VMResult execute(const Chunk& chunk);
+
+    // Clear all persistent variable state (used between REPL sessions if needed).
+    void resetState() { m_globals.clear(); }
+
+    // Read-only access to the global store (for REPL introspection).
+    const std::unordered_map<std::string, Value>& globals() const { return m_globals; }
 
 private:
     // ── Stack operations ─────────────────────────────────────────────────
@@ -59,7 +78,11 @@ private:
 
     // ── State ─────────────────────────────────────────────────────────────
     std::vector<Value>                        m_stack;
-    std::unordered_map<uint16_t, Value>       m_vars;   // name-index → value
+
+    // Persistent variable store: name string → value.
+    // Survives across execute() calls so the REPL keeps variables alive.
+    std::unordered_map<std::string, Value>    m_globals;
+
     const Chunk*                              m_chunk = nullptr;
     std::size_t                               m_ip    = 0;
 };

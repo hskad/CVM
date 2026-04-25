@@ -12,15 +12,15 @@ cmake -S . -B build
 cmake --build build
 
 # Run a script
-./build/cvm examples/arithmetic.cvm
+./build/cvm examples/fibonacci.cvm
 
-# Interactive REPL
+# Interactive REPL (variables persist across lines)
 ./build/cvm
 
-# Debug flags (can be combined)
-./build/cvm --debug-tokens   examples/arithmetic.cvm   # token stream
-./build/cvm --debug-ast      examples/arithmetic.cvm   # AST dump
-./build/cvm --debug-bytecode examples/arithmetic.cvm   # disassembly
+# Debug flags (can be combined with a file or used in REPL mode)
+./build/cvm --debug-tokens   examples/fibonacci.cvm   # token stream
+./build/cvm --debug-ast      examples/fibonacci.cvm   # AST dump
+./build/cvm --debug-bytecode examples/fibonacci.cvm   # disassembly
 ```
 
 ---
@@ -38,9 +38,12 @@ cmake --build build
 
 | Category    | Operators                             |
 |-------------|---------------------------------------|
-| Arithmetic  | `+`  `-`  `*`  `/`                   |
+| Arithmetic  | `+`  `-`  `*`  `/`  `%`             |
 | Comparison  | `==`  `!=`  `<`  `<=`  `>`  `>=`    |
+| Logical     | `&&`  `\|\|`  `!`                    |
 | Unary       | `-` (negate)  `!` (boolean not)      |
+
+`&&` and `||` short-circuit: the right-hand side is not evaluated if the result is already determined by the left.
 
 Operator precedence follows standard mathematical rules: `*` and `/` bind tighter than `+` and `-`; parentheses override everything.
 
@@ -82,26 +85,51 @@ let n = input;      // read an integer from stdin
 
 ---
 
+## REPL
+
+Running `./build/cvm` with no arguments starts the interactive REPL.  Variables declared on one line remain visible on all subsequent lines — the VM state is persistent for the whole session.
+
+```
+CVM++ 0.2.0  --  interactive REPL
+Type 'help' for commands, 'exit' to quit.
+
+cvm> let x = 10;
+cvm> let y = x * 2;
+cvm> print y;
+20
+cvm> vars
+  x = 10
+  y = 20
+cvm> reset
+  (all variables cleared)
+cvm> exit
+```
+
+### REPL special commands
+
+| Command | Effect |
+|---------|--------|
+| `exit` / `quit` | Leave the REPL |
+| `vars` | Print all currently defined variables and their values |
+| `reset` | Clear all variables |
+| `help` | Show the command list |
+
+---
+
 ## Example programs
 
-### Arithmetic (`examples/arithmetic.cvm`)
+| File | Description |
+|------|-------------|
+| `examples/hello.cvm` | Minimal program — declare a variable and print it |
+| `examples/arithmetic.cvm` | All four operators and a comparison |
+| `examples/fibonacci.cvm` | First 15 Fibonacci numbers (iterative) |
+| `examples/factorial.cvm` | Factorials of 1 through 10 |
+| `examples/fizzbuzz.cvm` | Classic FizzBuzz for 1–30 (sentinels: −1=Fizz, −2=Buzz, −3=FizzBuzz) |
+| `examples/power.cvm` | Powers of 2: 2⁰ through 2¹⁰ |
+| `examples/primes.cvm` | All primes up to 50 via trial division |
+| `examples/collatz.cvm` | Collatz sequence from 27 — terminates in 111 steps |
 
-```
-let a = 10;
-let b = 3;
-let sum  = a + b;   // 13
-let diff = a - b;   // 7
-let prod = a * b;   // 30
-let quot = a / b;   // 3
-print sum;
-print diff;
-print prod;
-print quot;
-let isGreater = a > b;
-print isGreater;    // true
-```
-
-### Factorial
+### Factorial (excerpt)
 
 ```
 let n = 5;
@@ -110,22 +138,22 @@ while (n > 1) {
     result = result * n;
     n = n - 1;
 }
-print result;       // 120
+print result;   // 120
 ```
 
-### Fibonacci (iterative)
+### Fibonacci (excerpt)
 
 ```
 let a = 0;
 let b = 1;
 let i = 0;
-while (i < 10) {
+while (i < 15) {
+    print a;
     let tmp = a + b;
     a = b;
     b = tmp;
     i = i + 1;
 }
-print a;            // 55
 ```
 
 ---
@@ -136,9 +164,9 @@ print a;            // 55
 Source text
     │
     ▼
-┌─────────┐    tokens     ┌────────┐    AST      ┌──────────┐    Chunk    ┌────┐
+┌─────────┐    tokens     ┌────────┐    AST      ┌──────────┐    Chunk     ┌────┐
 │  Lexer  │ ──────────▶  │ Parser │ ──────────▶ │ Compiler │ ──────────▶ │ VM │
-└─────────┘               └────────┘             └──────────┘             └────┘
+└─────────┘               └────────┘             └──────────┘              └────┘
 ```
 
 ### Lexer (`include/Token.h`, `src/Lexer.cpp`)
@@ -210,29 +238,31 @@ Stack-based interpreter that executes a `Chunk` in a tight `while(true)` dispatc
 CVM++/
 ├── CMakeLists.txt
 ├── include/
-│   ├── Token.h          ← TokenType enum, Token struct, stream operators
-│   ├── Lexer.h          ← Lexer interface
-│   ├── AST.h            ← Expr/Stmt nodes, factory functions, AST printer decl
-│   ├── Parser.h         ← Recursive-descent parser interface
-│   ├── Chunk.h          ← OpCode enum, Chunk (bytecode object), read helpers
-│   ├── Compiler.h       ← AST → bytecode compiler interface
-│   └── VM.h             ← Value type, VM interface
+│   ├── Token.h          <- TokenType enum, Token struct, stream operators
+│   ├── Lexer.h          <- Lexer interface
+│   ├── AST.h            <- Expr/Stmt nodes, factory functions, AST printer decl
+│   ├── Parser.h         <- Recursive-descent parser interface
+│   ├── Chunk.h          <- OpCode enum, Chunk (bytecode object), read helpers
+│   ├── Compiler.h       <- AST -> bytecode compiler interface
+│   └── VM.h             <- Value type, VM interface (persistent globals)
 ├── src/
-│   ├── Lexer.cpp        ← Lexer implementation
-│   ├── ASTPrinter.cpp   ← printExpr / printStmt (--debug-ast)
-│   ├── Parser.cpp       ← Parser implementation
-│   ├── Chunk.cpp        ← Chunk::disassemble (--debug-bytecode)
-│   ├── Compiler.cpp     ← Compiler implementation
-│   ├── VM.cpp           ← VM::execute dispatch loop
-│   └── main.cpp         ← CLI entry point (REPL + file runner + debug flags)
+│   ├── Lexer.cpp        <- Lexer implementation
+│   ├── ASTPrinter.cpp   <- printExpr / printStmt (--debug-ast)
+│   ├── Parser.cpp       <- Parser implementation
+│   ├── Chunk.cpp        <- Chunk::disassemble (--debug-bytecode)
+│   ├── Compiler.cpp     <- Compiler implementation
+│   ├── VM.cpp           <- VM::execute dispatch loop
+│   └── main.cpp         <- CLI: REPL (with vars/reset/help) + file runner
 ├── tests/
-│   ├── test_lexer.cpp   ← 71 lexer tests
-│   ├── test_parser.cpp  ← 99 parser tests
-│   ├── test_compiler.cpp← 84 compiler tests (exact bytecode assertions)
-│   └── test_vm.cpp      ← 44 end-to-end execution tests
+│   ├── test_lexer.cpp   <- 71  lexer tests
+│   ├── test_parser.cpp  <- 99  parser tests
+│   ├── test_compiler.cpp<- 84  compiler tests (exact bytecode assertions)
+│   └── test_vm.cpp      <- 44  end-to-end execution tests
 └── examples/
-    ├── hello.cvm
-    └── arithmetic.cvm
+    ├── fibonacci.cvm
+    ├── fizzbuzz.cvm
+    ├── primes.cvm
+    └── collatz.cvm
 ```
 
 ---
@@ -240,12 +270,12 @@ CVM++/
 ## Test suite
 
 ```bash
-./build/test_lexer      # 71  tests — tokenisation
-./build/test_parser     # 99  tests — AST structure
+./build/test_lexer      # 79  tests — tokenisation (incl. %, &&, ||)
+./build/test_parser     # 114 tests — AST structure (incl. precedence of new ops)
 ./build/test_compiler   # 84  tests — bytecode emission
-./build/test_vm         # 44  tests — end-to-end execution
-                        # ─────────────────────────────
-                        # 298 total, 0 failures
+./build/test_vm         # 65  tests — end-to-end execution (incl. %, &&, ||)
+                        # ─────────────────────────────────────────────
+                        # 342 total, 0 failures
 ```
 
 ---
@@ -258,7 +288,7 @@ CVM++/
 | 2 — Parser | ✅ Complete | Recursive-descent parser → typed AST |
 | 3 — Compiler | ✅ Complete | AST → bytecode with forward/back-jump patching |
 | 4 — VM | ✅ Complete | Stack-based execution engine with runtime error handling |
-| 5 — Polish | 🔜 Next | Richer error messages, more example scripts |
+| 5 — Polish | ✅ Complete | Persistent REPL, richer error messages, 8 example scripts |
 
 ---
 

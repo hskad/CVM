@@ -1,0 +1,30 @@
+// collatz.cvm
+// Prints the Collatz sequence starting from 27.
+// The sequence terminates when it reaches 1.
+// (27 produces 111 steps -- a classic stress test.)
+
+let n = 27;
+let steps = 0;
+
+while (n != 1) {
+    print n;
+
+    // if n is even: n = n / 2
+    // if n is odd:  n = 3*n + 1
+    // CVM++ has no modulo, so we detect even/odd via repeated subtraction:
+    // even if n - 2*(n/2) == 0
+    let half   = n / 2;
+    let double = half + half;
+    let isEven = double == n;
+
+    if (isEven == true) {
+        n = n / 2;
+    } else {
+        n = n + n + n + 1;
+    }
+
+    steps = steps + 1;
+}
+
+print 1;        // the final 1
+print steps;    // total number of steps

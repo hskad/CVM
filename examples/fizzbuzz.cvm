@@ -1,0 +1,17 @@
+// fizzbuzz.cvm
+// Classic FizzBuzz 1-30, using % and &&.
+// CVM++ has no string type, so sentinel integers are used:
+//   -1 = Fizz,  -2 = Buzz,  -3 = FizzBuzz
+
+let i = 1;
+while (i <= 30) {
+    let fizz = i % 3 == 0;
+    let buzz = i % 5 == 0;
+
+    if (fizz && buzz) { print -3; }
+    else if (fizz)    { print -1; }
+    else if (buzz)    { print -2; }
+    else              { print i;  }
+
+    i = i + 1;
+}

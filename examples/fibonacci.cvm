@@ -1,0 +1,14 @@
+// fibonacci.cvm
+// Prints the first 15 Fibonacci numbers using an iterative approach.
+
+let a = 0;
+let b = 1;
+let i = 0;
+
+while (i < 15) {
+    print a;
+    let tmp = a + b;
+    a = b;
+    b = tmp;
+    i = i + 1;
+}

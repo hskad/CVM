@@ -31,6 +31,11 @@ enum class TokenType {
     MINUS,          // -
     STAR,           // *
     SLASH,          // /
+    PERCENT,        // %
+
+    // ── Logical operators ──────────────────────────────────────────────────
+    AND,            // &&
+    OR,             // ||
 
     // ── Comparison / assignment operators ─────────────────────────────────
     EQ,             // =
@@ -92,6 +97,9 @@ inline std::string tokenTypeName(TokenType t) {
         case TokenType::MINUS:       return "MINUS";
         case TokenType::STAR:        return "STAR";
         case TokenType::SLASH:       return "SLASH";
+        case TokenType::PERCENT:     return "PERCENT";
+        case TokenType::AND:         return "AND";
+        case TokenType::OR:          return "OR";
         case TokenType::EQ:          return "EQ";
         case TokenType::EQEQ:        return "EQEQ";
         case TokenType::BANG:        return "BANG";

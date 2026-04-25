@@ -1,7 +1,6 @@
 #include "VM.h"
 #include "Chunk.h"
 
-#include <cstdio>
 #include <iostream>
 #include <string>
 
@@ -34,45 +33,47 @@ Value VM::pop() {
 Value VM::peek() const { return m_stack.back(); }
 
 VMResult VM::runtimeError(const std::string& msg) {
-    std::cerr << "[VM] Runtime error at offset "
-              << (m_ip > 0 ? m_ip - 1 : 0)
-              << ": " << msg << "\n";
+    int line = m_chunk ? m_chunk->lineAt(m_ip > 0 ? m_ip - 1 : 0) : -1;
+    if (line > 0)
+        std::cerr << "[VM] Line " << line << ": " << msg << "\n";
+    else
+        std::cerr << "[VM] Runtime error: " << msg << "\n";
     m_stack.clear();
-    m_vars.clear();
     return VMResult::RUNTIME_ERROR;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // execute()
+//
+// Runs the chunk and returns OK or RUNTIME_ERROR.
+//
+// Variable storage strategy:
+//   Each chunk has a names[] table mapping uint16 index -> string name.
+//   At runtime we resolve index -> name via the chunk, then look up / store
+//   the value in m_globals (string-keyed) so that variables defined in one
+//   REPL line are visible to the next.
 // ─────────────────────────────────────────────────────────────────────────────
 VMResult VM::execute(const Chunk& chunk) {
     m_chunk = &chunk;
     m_ip    = 0;
     m_stack.clear();
-    m_vars.clear();
+    // NOTE: m_globals is intentionally NOT cleared here -- persistence is the point.
 
     const auto& code  = chunk.code;
     const auto& names = chunk.names;
 
-    // ── Fetch helpers ─────────────────────────────────────────────────────
-    auto readU8 = [&]() -> uint8_t {
-        return code[m_ip++];
-    };
+    // Fetch helpers
+    auto readU8 = [&]() -> uint8_t  { return code[m_ip++]; };
     auto readI32 = [&]() -> int32_t {
-        int32_t v = readInt32(code, m_ip);
-        m_ip += 4;
-        return v;
+        int32_t v = readInt32(code, m_ip); m_ip += 4; return v;
     };
     auto readU16 = [&]() -> uint16_t {
-        uint16_t v = readUint16(code, m_ip);
-        m_ip += 2;
-        return v;
+        uint16_t v = readUint16(code, m_ip); m_ip += 2; return v;
     };
     auto readI16 = [&]() -> int16_t {
-        int16_t v = readInt16(code, m_ip);
-        m_ip += 2;
-        return v;
+        int16_t v = readInt16(code, m_ip); m_ip += 2; return v;
     };
+    auto nameOf = [&](uint16_t idx) -> const std::string& { return names[idx]; };
 
     // ── Dispatch loop ─────────────────────────────────────────────────────
     while (true) {
@@ -81,39 +82,31 @@ VMResult VM::execute(const Chunk& chunk) {
         switch (op) {
 
             // ── Literals ─────────────────────────────────────────────────
-            case OpCode::PUSH_INT: {
-                int32_t v = readI32();
-                push(Value{v});
-                break;
-            }
-            case OpCode::PUSH_BOOL: {
-                bool b = (readU8() != 0);
-                push(Value{b});
-                break;
-            }
+            case OpCode::PUSH_INT:  push(Value{ readI32() }); break;
+            case OpCode::PUSH_BOOL: push(Value{ readU8() != 0 }); break;
 
             // ── Variables ─────────────────────────────────────────────────
             case OpCode::DEFINE: {
                 uint16_t idx = readU16();
-                m_vars[idx] = pop();
+                m_globals[nameOf(idx)] = pop();
                 break;
             }
             case OpCode::STORE: {
                 uint16_t idx = readU16();
-                if (m_vars.find(idx) == m_vars.end()) {
+                const std::string& name = nameOf(idx);
+                if (m_globals.find(name) == m_globals.end())
                     return runtimeError(
-                        "Assignment to undefined variable '" + names[idx] + "'");
-                }
-                m_vars[idx] = pop();
+                        "Assignment to undefined variable '" + name + "'.\n"
+                        "  Hint: declare it first with 'let " + name + " = <value>;'");
+                m_globals[name] = pop();
                 break;
             }
             case OpCode::LOAD: {
                 uint16_t idx = readU16();
-                auto it = m_vars.find(idx);
-                if (it == m_vars.end()) {
-                    return runtimeError(
-                        "Undefined variable '" + names[idx] + "'");
-                }
+                const std::string& name = nameOf(idx);
+                auto it = m_globals.find(name);
+                if (it == m_globals.end())
+                    return runtimeError("Undefined variable '" + name + "'.");
                 push(it->second);
                 break;
             }
@@ -122,38 +115,53 @@ VMResult VM::execute(const Chunk& chunk) {
             case OpCode::ADD: {
                 Value b = pop(), a = pop();
                 if (!isInt(a) || !isInt(b))
-                    return runtimeError("'+' requires integer operands");
-                push(Value{asInt(a) + asInt(b)});
+                    return runtimeError("'+' requires integer operands, got "
+                        + valueStr(a) + " and " + valueStr(b) + ".");
+                push(Value{ asInt(a) + asInt(b) });
                 break;
             }
             case OpCode::SUB: {
                 Value b = pop(), a = pop();
                 if (!isInt(a) || !isInt(b))
-                    return runtimeError("'-' requires integer operands");
-                push(Value{asInt(a) - asInt(b)});
+                    return runtimeError("'-' requires integer operands, got "
+                        + valueStr(a) + " and " + valueStr(b) + ".");
+                push(Value{ asInt(a) - asInt(b) });
                 break;
             }
             case OpCode::MUL: {
                 Value b = pop(), a = pop();
                 if (!isInt(a) || !isInt(b))
-                    return runtimeError("'*' requires integer operands");
-                push(Value{asInt(a) * asInt(b)});
+                    return runtimeError("'*' requires integer operands, got "
+                        + valueStr(a) + " and " + valueStr(b) + ".");
+                push(Value{ asInt(a) * asInt(b) });
                 break;
             }
             case OpCode::DIV: {
                 Value b = pop(), a = pop();
                 if (!isInt(a) || !isInt(b))
-                    return runtimeError("'/' requires integer operands");
+                    return runtimeError("'/' requires integer operands, got "
+                        + valueStr(a) + " and " + valueStr(b) + ".");
                 if (asInt(b) == 0)
-                    return runtimeError("Division by zero");
-                push(Value{asInt(a) / asInt(b)});
+                    return runtimeError("Division by zero.");
+                push(Value{ asInt(a) / asInt(b) });
+                break;
+            }
+            case OpCode::MOD: {
+                Value b = pop(), a = pop();
+                if (!isInt(a) || !isInt(b))
+                    return runtimeError("'%' requires integer operands, got "
+                        + valueStr(a) + " and " + valueStr(b) + ".");
+                if (asInt(b) == 0)
+                    return runtimeError("Modulo by zero.");
+                push(Value{ asInt(a) % asInt(b) });
                 break;
             }
             case OpCode::NEG: {
                 Value a = pop();
                 if (!isInt(a))
-                    return runtimeError("Unary '-' requires an integer");
-                push(Value{-asInt(a)});
+                    return runtimeError("Unary '-' requires an integer, got "
+                        + valueStr(a) + ".");
+                push(Value{ -asInt(a) });
                 break;
             }
 
@@ -161,92 +169,77 @@ VMResult VM::execute(const Chunk& chunk) {
             case OpCode::NOT: {
                 Value a = pop();
                 if (!isBool(a))
-                    return runtimeError("'!' requires a boolean");
-                push(Value{!asBool(a)});
+                    return runtimeError("'!' requires a boolean, got "
+                        + valueStr(a) + ".");
+                push(Value{ !asBool(a) });
                 break;
             }
 
             // ── Comparisons ───────────────────────────────────────────────
-            case OpCode::EQ: {
-                Value b = pop(), a = pop();
-                // Allow cross-type == (always false if types differ)
-                push(Value{a == b});
-                break;
-            }
-            case OpCode::NEQ: {
-                Value b = pop(), a = pop();
-                push(Value{a != b});
-                break;
-            }
+            case OpCode::EQ:  { Value b=pop(),a=pop(); push(Value{a==b}); break; }
+            case OpCode::NEQ: { Value b=pop(),a=pop(); push(Value{a!=b}); break; }
             case OpCode::LT: {
-                Value b = pop(), a = pop();
-                if (!isInt(a) || !isInt(b))
-                    return runtimeError("'<' requires integer operands");
-                push(Value{asInt(a) < asInt(b)});
-                break;
+                Value b=pop(),a=pop();
+                if (!isInt(a)||!isInt(b)) return runtimeError(
+                    "'<' requires integer operands, got "
+                    +valueStr(a)+" and "+valueStr(b)+".");
+                push(Value{asInt(a)<asInt(b)}); break;
             }
             case OpCode::LT_EQ: {
-                Value b = pop(), a = pop();
-                if (!isInt(a) || !isInt(b))
-                    return runtimeError("'<=' requires integer operands");
-                push(Value{asInt(a) <= asInt(b)});
-                break;
+                Value b=pop(),a=pop();
+                if (!isInt(a)||!isInt(b)) return runtimeError(
+                    "'<=' requires integer operands, got "
+                    +valueStr(a)+" and "+valueStr(b)+".");
+                push(Value{asInt(a)<=asInt(b)}); break;
             }
             case OpCode::GT: {
-                Value b = pop(), a = pop();
-                if (!isInt(a) || !isInt(b))
-                    return runtimeError("'>' requires integer operands");
-                push(Value{asInt(a) > asInt(b)});
-                break;
+                Value b=pop(),a=pop();
+                if (!isInt(a)||!isInt(b)) return runtimeError(
+                    "'>' requires integer operands, got "
+                    +valueStr(a)+" and "+valueStr(b)+".");
+                push(Value{asInt(a)>asInt(b)}); break;
             }
             case OpCode::GT_EQ: {
-                Value b = pop(), a = pop();
-                if (!isInt(a) || !isInt(b))
-                    return runtimeError("'>=' requires integer operands");
-                push(Value{asInt(a) >= asInt(b)});
-                break;
+                Value b=pop(),a=pop();
+                if (!isInt(a)||!isInt(b)) return runtimeError(
+                    "'>=' requires integer operands, got "
+                    +valueStr(a)+" and "+valueStr(b)+".");
+                push(Value{asInt(a)>=asInt(b)}); break;
             }
 
             // ── I/O ───────────────────────────────────────────────────────
             case OpCode::PRINT: {
-                Value v = pop();
-                printValue(v);
+                printValue(pop());
                 break;
             }
             case OpCode::INPUT: {
                 int32_t n = 0;
                 if (!(std::cin >> n)) {
-                    // On bad input, push 0 and clear error state
                     std::cin.clear();
                     std::cin.ignore(1000, '\n');
                     n = 0;
                 }
-                push(Value{n});
+                push(Value{ n });
                 break;
             }
 
             // ── Stack ─────────────────────────────────────────────────────
-            case OpCode::POP:
-                pop();
-                break;
+            case OpCode::POP: pop(); break;
 
             // ── Control flow ──────────────────────────────────────────────
             case OpCode::JUMP: {
-                int16_t offset = readI16();
+                int16_t off = readI16();
                 m_ip = static_cast<std::size_t>(
-                    static_cast<std::ptrdiff_t>(m_ip) + offset);
+                    static_cast<std::ptrdiff_t>(m_ip) + off);
                 break;
             }
             case OpCode::JUMP_IF_FALSE: {
-                int16_t offset = readI16();
+                int16_t off = readI16();
                 Value cond = pop();
-                bool taken = false;
-                if (isBool(cond))       taken = !asBool(cond);
-                else if (isInt(cond))   taken = (asInt(cond) == 0);
-                if (taken) {
+                bool taken = isBool(cond) ? !asBool(cond) : (asInt(cond) == 0);
+                if (taken)
                     m_ip = static_cast<std::size_t>(
-                        static_cast<std::ptrdiff_t>(m_ip) + offset);
-                }
+                        static_cast<std::ptrdiff_t>(m_ip) + off);
                 break;
             }
 
@@ -255,7 +248,7 @@ VMResult VM::execute(const Chunk& chunk) {
                 return VMResult::OK;
 
             default:
-                return runtimeError("Unknown opcode");
+                return runtimeError("Unknown opcode.");
         }
     }
 }
